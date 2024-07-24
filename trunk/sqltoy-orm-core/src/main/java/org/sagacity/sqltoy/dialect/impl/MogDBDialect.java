@@ -400,7 +400,7 @@ public class MogDBDialect implements Dialect {
 	@Override
 	public List<ColumnMeta> getTableColumns(String catalog, String schema, String tableName, Connection conn,
 			Integer dbType, String dialect) throws Exception {
-		return DefaultDialectUtils.getTableColumns(catalog, schema, tableName, conn, dbType, dialect);
+		return MogDBDialectUtils.getTableColumns(catalog, schema, tableName, conn, dbType, dialect);
 	}
 
 	@Override
