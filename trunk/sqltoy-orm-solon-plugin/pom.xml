@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.sagframe</groupId>
-    <version>5.6.10</version>
+    <version>5.6.29</version>
 
     <artifactId>sagacity-sqltoy-solon-plugin</artifactId>
     <name>sagacity-sqltoy-solon-plugin</name>
@@ -16,12 +16,14 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <solon.version>2.8.3</solon.version>
-        <redisx.version>1.6.3</redisx.version>
-        <mongo.version>3.12.14</mongo.version>
-        <slf4j.version>2.0.13</slf4j.version>
+        <solon.version>3.0.2</solon.version>
+        <redisx.version>1.6.7</redisx.version>
+        <mongo.version>5.2.0</mongo.version>
+        <slf4j.version>2.0.16</slf4j.version>
         <caffeine.version>3.1.8</caffeine.version>
-        <lombok.version>1.18.32</lombok.version>
+        <lombok.version>1.18.34</lombok.version>
+        <HikariCP.version>6.0.0</HikariCP.version>
+        <mysql.version>9.1.0</mysql.version>
     </properties>
 
     <licenses>
@@ -95,7 +97,7 @@
 
         <dependency>
             <groupId>org.mongodb</groupId>
-            <artifactId>mongo-java-driver</artifactId>
+            <artifactId>mongodb-driver-sync</artifactId>
             <version>${mongo.version}</version>
             <scope>provided</scope>
             <optional>true</optional>
@@ -113,14 +115,14 @@
         <dependency>
             <groupId>com.zaxxer</groupId>
             <artifactId>HikariCP</artifactId>
-            <version>4.0.3</version>
+            <version>${HikariCP.version}</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
-            <version>8.0.33</version>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>${mysql.version}</version>
             <scope>test</scope>
         </dependency>
 

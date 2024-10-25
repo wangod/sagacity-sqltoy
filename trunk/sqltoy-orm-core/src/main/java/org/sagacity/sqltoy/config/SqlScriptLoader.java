@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
  * @modify Date:2023-8-19 增加了@include(:scriptName) 模式
  * @modify Date:2024-5-13 @include(id="sqlId")
  *         增强兼容sqlId根据dialect方言找sqlId_dialect模式
+ * @modify Date:2024-09-19 增加@fast(@include("sqlId")) 场景
  */
 @SuppressWarnings({ "rawtypes", "unchecked" })
 public class SqlScriptLoader {
@@ -295,8 +296,15 @@ public class SqlScriptLoader {
 					result.clearDialectSql();
 				}
 				// 替换include的实际sql
-				String sql = MacroUtils.replaceMacros(result.getSql(), (Map) sqlCache, paramValues, false, macros,
-						dialect);
+				String sql = result.getSql();
+				// update 2024-09-19 增加@fast(@include("sqlId")) 场景，result.getSql()
+				// 已经剔除了@fast,导致再次解析时已经无法判断是@fast语句，所以需要拼接上@fast还原原本的sql
+				// SqlToyConfig.setSql(fastPreSql.concat(" (").concat(fastSql).concat(")").concat(fastTailSql)),剔除了@fast
+				if (result.isHasFast()) {
+					sql = result.getFastPreSql(null).concat(" @fast(").concat(result.getFastSql(null)).concat(") ")
+							.concat(result.getFastTailSql(null));
+				}
+				sql = MacroUtils.replaceMacros(sql, (Map) sqlCache, paramValues, false, macros, dialect);
 				// 重新解析sql内容
 				SqlToyConfig tmpConfig = SqlConfigParseUtils.parseSqlToyConfig(sql, realDialect, sqlType);
 				result.setHasUnion(tmpConfig.isHasUnion());

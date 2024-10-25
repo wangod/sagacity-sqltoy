@@ -11,6 +11,7 @@ import org.sagacity.sqltoy.callback.DecryptHandler;
 import org.sagacity.sqltoy.callback.ReflectPropsHandler;
 import org.sagacity.sqltoy.callback.UpdateRowHandler;
 import org.sagacity.sqltoy.config.model.EntityMeta;
+import org.sagacity.sqltoy.config.model.PKStrategy;
 import org.sagacity.sqltoy.config.model.SqlToyConfig;
 import org.sagacity.sqltoy.config.model.SqlType;
 import org.sagacity.sqltoy.dialect.Dialect;
@@ -101,34 +102,37 @@ public class ClickHouseDialect implements Dialect {
 	}
 
 	@Override
-	public Serializable load(SqlToyContext sqlToyContext, Serializable entity, List<Class> cascadeTypes,
-			LockMode lockMode, Connection conn, Integer dbType, String dialect, String tableName) throws Exception {
+	public Serializable load(SqlToyContext sqlToyContext, Serializable entity, boolean onlySubTables,
+			List<Class> cascadeTypes, LockMode lockMode, Connection conn, Integer dbType, String dialect,
+			String tableName) throws Exception {
 		EntityMeta entityMeta = sqlToyContext.getEntityMeta(entity.getClass());
 		// 获取loadsql(loadsql 可以通过@loadSql进行改变，所以需要sqltoyContext重新获取)
 		SqlToyConfig sqlToyConfig = sqlToyContext.getSqlToyConfig(entityMeta.getLoadSql(tableName), SqlType.search,
 				dialect, null);
 		String loadSql = sqlToyConfig.getSql(dialect);
-		return (Serializable) DialectUtils.load(sqlToyContext, sqlToyConfig, loadSql, entityMeta, entity, cascadeTypes,
-				conn, dbType);
+		return (Serializable) DialectUtils.load(sqlToyContext, sqlToyConfig, loadSql, entityMeta, entity, onlySubTables,
+				cascadeTypes, conn, dbType);
 	}
 
 	@Override
-	public List<?> loadAll(SqlToyContext sqlToyContext, List<?> entities, List<Class> cascadeTypes, LockMode lockMode,
-			Connection conn, Integer dbType, String dialect, String tableName, final int fetchSize, final int maxRows)
-			throws Exception {
-		return DialectUtils.loadAll(sqlToyContext, entities, cascadeTypes, lockMode, conn, dbType, tableName, null,
-				fetchSize, maxRows);
+	public List<?> loadAll(SqlToyContext sqlToyContext, List<?> entities, boolean onlySubTables,
+			List<Class> cascadeTypes, LockMode lockMode, Connection conn, Integer dbType, String dialect,
+			String tableName, final int fetchSize, final int maxRows) throws Exception {
+		return DialectUtils.loadAll(sqlToyContext, entities, onlySubTables, cascadeTypes, lockMode, conn, dbType,
+				tableName, null, fetchSize, maxRows);
 	}
 
 	@Override
 	public Object save(SqlToyContext sqlToyContext, Serializable entity, Connection conn, Integer dbType,
 			String dialect, String tableName) throws Exception {
 		EntityMeta entityMeta = sqlToyContext.getEntityMeta(entity.getClass());
+		// save行为根据主键是否赋值情况调整最终的主键策略
+		PKStrategy pkStrategy = DialectUtils.getSavePKStrategy(entityMeta, entity, dbType);
 		// clickhouse 不支持sequence，支持identity自增模式
 		String insertSql = DialectExtUtils.generateInsertSql(sqlToyContext.getUnifyFieldsHandler(), dbType, entityMeta,
-				entityMeta.getIdStrategy(), NVL_FUNCTION, "NEXTVAL FOR " + entityMeta.getSequence(),
-				ClickHouseDialectUtils.isAssignPKValue(entityMeta.getIdStrategy()), tableName);
-		return ClickHouseDialectUtils.save(sqlToyContext, entityMeta, insertSql, entity, conn, dbType);
+				pkStrategy, NVL_FUNCTION, "NEXTVAL FOR " + entityMeta.getSequence(),
+				ClickHouseDialectUtils.isAssignPKValue(pkStrategy), tableName);
+		return ClickHouseDialectUtils.save(sqlToyContext, entityMeta, pkStrategy, insertSql, entity, conn, dbType);
 	}
 
 	@Override

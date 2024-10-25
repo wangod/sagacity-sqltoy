@@ -1,6 +1,7 @@
 package org.sagacity.sqltoy.dao;
 
 import java.io.Serializable;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -763,6 +764,23 @@ public interface LightDao {
 	public String generateBizId(Serializable entity);
 
 	/**
+	 * @TODO 根据指定的表名、业务码，业务码的属性和值map，动态获取业务主键值 例如:generateBizId("sag_test",
+	 *       "HW@case(orderType,SALE,SC,BUY,PO)@day(yyMMdd)",
+	 *       MapKit.map("orderType", "SALE"), null, 12, 2);
+	 * @param tableName
+	 * @param signature    一个表达式字符串，支持@case(name,value1,then1,val2,then2)
+	 *                     和 @day(yyMMdd)或@day(yyyyMMdd)、@substr(name,start,length)
+	 *                     等
+	 * @param keyValues
+	 * @param bizDate      在signature为空时生效
+	 * @param length
+	 * @param sequenceSize
+	 * @return
+	 */
+	public String generateBizId(String tableName, String signature, Map<String, Object> keyValues, LocalDate bizDate,
+			int length, int sequenceSize);
+
+	/**
 	 * @todo 获取sqltoy中用于翻译的缓存,方便用于页面下拉框选项、checkbox选项、suggest组件等
 	 * @param cacheName
 	 * @param cacheType 如是数据字典,则传入字典类型否则为null即可
@@ -791,11 +809,17 @@ public interface LightDao {
 	/**
 	 * @todo 对数据集合通过反调函数对具体属性进行翻译
 	 *       <p>
-	 *       sqlToyLazyDao.translate(staffVOs<StaffInfoVO>, "staffIdName", new
-	 *       TranslateHandler() { //告知key值 public Object getKey(Object row) { return
-	 *       ((StaffInfoVO)row).getStaffId(); } // 将翻译后的名称值设置到对应的属性上 public void
-	 *       setName(Object row, String name) {
-	 *       ((StaffInfoVO)row).setStaffName(name); } });
+	 *       <li>sqlToyLazyDao.translate(staffVOs<StaffInfoVO>, "staffIdName",
+	 *       <li>----new TranslateHandler() {
+	 *       <li>----//告知key值
+	 *       <li>----public Object getKey(Object row) {
+	 *       <li>--------return ((StaffInfoVO)row).getStaffId();
+	 *       <li>----}
+	 *       <li>----// 将翻译后的名称值设置到对应的属性上
+	 *       <li>----public void setName(Object row, String name) {
+	 *       <li>--------((StaffInfoVO)row).setStaffName(name);
+	 *       <li>----}
+	 *       <li>});
 	 *       </p>
 	 * @param dataSet        数据集合
 	 * @param cacheName      缓存名称

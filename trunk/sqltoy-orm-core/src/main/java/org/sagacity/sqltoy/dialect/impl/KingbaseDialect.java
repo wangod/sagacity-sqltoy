@@ -186,17 +186,16 @@ public class KingbaseDialect implements Dialect {
 						String sequence = "NEXTVAL('" + entityMeta.getSequence() + "')";
 						// kingbase identity 是sequence的一种变化实现
 						if (pkStrategy != null && pkStrategy.equals(PKStrategy.IDENTITY)) {
-							String defaultValue = entityMeta.getFieldsMeta().get(entityMeta.getIdArray()[0])
-									.getDefaultValue();
+							String defaultValue = entityMeta.getFieldMeta(entityMeta.getIdArray()[0]).getDefaultValue();
 							if (StringUtil.isNotBlank(defaultValue)) {
 								pkStrategy = PKStrategy.SEQUENCE;
 								sequence = "NEXTVAL('" + defaultValue + "')";
 							}
 						}
 						boolean isAssignPK = KingbaseDialectUtils.isAssignPKValue(pkStrategy);
-						return DialectUtils.getSaveOrUpdateSql(sqlToyContext.getUnifyFieldsHandler(), dbType,
-								entityMeta, pkStrategy, forceUpdateFields, null, NVL_FUNCTION, sequence, isAssignPK,
-								tableName);
+						return DialectUtils.getSaveOrUpdateSql(sqlToyContext, sqlToyContext.getUnifyFieldsHandler(),
+								dbType, entityMeta, pkStrategy, forceUpdateFields, null, NVL_FUNCTION, sequence,
+								isAssignPK, tableName);
 					}
 				}, reflectPropsHandler, conn, dbType, autoCommit);
 	}
@@ -214,8 +213,7 @@ public class KingbaseDialect implements Dialect {
 						String sequence = "NEXTVAL('" + entityMeta.getSequence() + "')";
 						// kingbase identity 是sequence的一种变化实现
 						if (pkStrategy != null && pkStrategy.equals(PKStrategy.IDENTITY)) {
-							String defaultValue = entityMeta.getFieldsMeta().get(entityMeta.getIdArray()[0])
-									.getDefaultValue();
+							String defaultValue = entityMeta.getFieldMeta(entityMeta.getIdArray()[0]).getDefaultValue();
 							if (StringUtil.isNotBlank(defaultValue)) {
 								pkStrategy = PKStrategy.SEQUENCE;
 								sequence = "NEXTVAL('" + defaultValue + "')";
@@ -235,17 +233,17 @@ public class KingbaseDialect implements Dialect {
 	 * java.util.List, java.sql.Connection)
 	 */
 	@Override
-	public Serializable load(final SqlToyContext sqlToyContext, Serializable entity, List<Class> cascadeTypes,
-			LockMode lockMode, Connection conn, final Integer dbType, final String dialect, final String tableName)
-			throws Exception {
+	public Serializable load(final SqlToyContext sqlToyContext, Serializable entity, boolean onlySubTables,
+			List<Class> cascadeTypes, LockMode lockMode, Connection conn, final Integer dbType, final String dialect,
+			final String tableName) throws Exception {
 		EntityMeta entityMeta = sqlToyContext.getEntityMeta(entity.getClass());
 		// 获取loadsql(loadsql 可以通过@loadSql进行改变，所以需要sqltoyContext重新获取)
 		SqlToyConfig sqlToyConfig = sqlToyContext.getSqlToyConfig(entityMeta.getLoadSql(tableName), SqlType.search,
 				dialect, null);
 		String loadSql = sqlToyConfig.getSql(dialect);
 		loadSql = loadSql.concat(getLockSql(loadSql, dbType, lockMode));
-		return (Serializable) DialectUtils.load(sqlToyContext, sqlToyConfig, loadSql, entityMeta, entity, cascadeTypes,
-				conn, dbType);
+		return (Serializable) DialectUtils.load(sqlToyContext, sqlToyConfig, loadSql, entityMeta, entity, onlySubTables,
+				cascadeTypes, conn, dbType);
 	}
 
 	/*
@@ -255,11 +253,11 @@ public class KingbaseDialect implements Dialect {
 	 * java.util.List, java.sql.Connection)
 	 */
 	@Override
-	public List<?> loadAll(final SqlToyContext sqlToyContext, List<?> entities, List<Class> cascadeTypes,
-			LockMode lockMode, Connection conn, final Integer dbType, final String dialect, final String tableName,
-			final int fetchSize, final int maxRows) throws Exception {
-		return DialectUtils.loadAll(sqlToyContext, entities, cascadeTypes, lockMode, conn, dbType, tableName,
-				(sql, dbTypeValue, lockedMode) -> {
+	public List<?> loadAll(final SqlToyContext sqlToyContext, List<?> entities, boolean onlySubTables,
+			List<Class> cascadeTypes, LockMode lockMode, Connection conn, final Integer dbType, final String dialect,
+			final String tableName, final int fetchSize, final int maxRows) throws Exception {
+		return DialectUtils.loadAll(sqlToyContext, entities, onlySubTables, cascadeTypes, lockMode, conn, dbType,
+				tableName, (sql, dbTypeValue, lockedMode) -> {
 					return getLockSql(sql, dbTypeValue, lockedMode);
 				}, fetchSize, maxRows);
 	}
@@ -274,11 +272,12 @@ public class KingbaseDialect implements Dialect {
 	public Object save(SqlToyContext sqlToyContext, Serializable entity, Connection conn, final Integer dbType,
 			final String dialect, final String tableName) throws Exception {
 		EntityMeta entityMeta = sqlToyContext.getEntityMeta(entity.getClass());
-		boolean isAssignPK = KingbaseDialectUtils.isAssignPKValue(entityMeta.getIdStrategy());
+		// save行为根据主键是否赋值情况调整最终的主键策略
+		PKStrategy pkStrategy = DialectUtils.getSavePKStrategy(entityMeta, entity, dbType);
+		boolean isAssignPK = KingbaseDialectUtils.isAssignPKValue(pkStrategy);
 		String insertSql = DialectExtUtils.generateInsertSql(sqlToyContext.getUnifyFieldsHandler(), dbType, entityMeta,
-				entityMeta.getIdStrategy(), NVL_FUNCTION, "NEXTVAL('" + entityMeta.getSequence() + "')", isAssignPK,
-				tableName);
-		return DialectUtils.save(sqlToyContext, entityMeta, entityMeta.getIdStrategy(), isAssignPK, insertSql, entity,
+				pkStrategy, NVL_FUNCTION, "NEXTVAL('" + entityMeta.getSequence() + "')", isAssignPK, tableName);
+		return DialectUtils.save(sqlToyContext, entityMeta, pkStrategy, isAssignPK, insertSql, entity,
 				new GenerateSqlHandler() {
 					@Override
 					public String generateSql(EntityMeta entityMeta, String[] forceUpdateField) {
@@ -336,8 +335,7 @@ public class KingbaseDialect implements Dialect {
 						String sequence = "NEXTVAL('" + entityMeta.getSequence() + "')";
 						// kingbase identity 是sequence的一种变化实现
 						if (pkStrategy != null && pkStrategy.equals(PKStrategy.IDENTITY)) {
-							String defaultValue = entityMeta.getFieldsMeta().get(entityMeta.getIdArray()[0])
-									.getDefaultValue();
+							String defaultValue = entityMeta.getFieldMeta(entityMeta.getIdArray()[0]).getDefaultValue();
 							if (StringUtil.isNotBlank(defaultValue)) {
 								pkStrategy = PKStrategy.SEQUENCE;
 								sequence = "NEXTVAL('" + defaultValue + "')";
@@ -345,9 +343,9 @@ public class KingbaseDialect implements Dialect {
 						}
 						boolean isAssignPK = KingbaseDialectUtils.isAssignPKValue(pkStrategy);
 						// update 级联操作过程中会自动判断数据库类型
-						return DialectUtils.getSaveOrUpdateSql(sqlToyContext.getUnifyFieldsHandler(), dbType,
-								entityMeta, pkStrategy, forceUpdateFields, null, NVL_FUNCTION, sequence, isAssignPK,
-								null);
+						return DialectUtils.getSaveOrUpdateSql(sqlToyContext, sqlToyContext.getUnifyFieldsHandler(),
+								dbType, entityMeta, pkStrategy, forceUpdateFields, null, NVL_FUNCTION, sequence,
+								isAssignPK, null);
 					}
 				}, forceCascadeClasses, subTableForceUpdateProps, conn, dbType, tableName);
 	}

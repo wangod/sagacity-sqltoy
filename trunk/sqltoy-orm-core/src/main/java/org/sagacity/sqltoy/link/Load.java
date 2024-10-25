@@ -10,6 +10,7 @@ import javax.sql.DataSource;
 
 import org.sagacity.sqltoy.SqlToyContext;
 import org.sagacity.sqltoy.model.LockMode;
+import org.sagacity.sqltoy.model.ParallelConfig;
 
 /**
  * @project sagacity-sqltoy
@@ -32,6 +33,23 @@ public class Load extends BaseLink {
 	 * 级联的对象类型
 	 */
 	private Class<?>[] cascadeTypes;
+
+	/**
+	 * 级联加载所有子对象
+	 */
+	private boolean cascadeAll = false;
+
+	/**
+	 * 仅仅只加载子对象，主对象无需重复加载查询
+	 */
+	private boolean onlyCascade = false;
+
+	private ParallelConfig parallelConfig;
+
+	public Load parallelConfig(ParallelConfig parallelConfig) {
+		this.parallelConfig = parallelConfig;
+		return this;
+	}
 
 	/**
 	 * @param sqlToyContext
@@ -62,6 +80,11 @@ public class Load extends BaseLink {
 		return this;
 	}
 
+	public Load cascadeAll() {
+		this.cascadeAll = true;
+		return this;
+	}
+
 	/**
 	 * @todo 锁表策略
 	 * @param lockMode
@@ -69,6 +92,11 @@ public class Load extends BaseLink {
 	 */
 	public Load lock(LockMode lockMode) {
 		this.lockMode = lockMode;
+		return this;
+	}
+
+	public Load onlyCascade() {
+		this.onlyCascade = true;
 		return this;
 	}
 
@@ -81,7 +109,10 @@ public class Load extends BaseLink {
 		if (entity == null) {
 			throw new IllegalArgumentException("load entity is null!");
 		}
-		return dialectFactory.load(sqlToyContext, entity, cascadeTypes, lockMode, getDataSource(null));
+		if ((cascadeTypes == null || cascadeTypes.length == 0) && (cascadeAll || onlyCascade)) {
+			cascadeTypes = sqlToyContext.getEntityMeta(entity.getClass()).getCascadeTypes();
+		}
+		return dialectFactory.load(sqlToyContext, entity, onlyCascade, cascadeTypes, lockMode, getDataSource(null));
 	}
 
 	/**
@@ -93,7 +124,11 @@ public class Load extends BaseLink {
 		if (entities == null || entities.isEmpty()) {
 			throw new IllegalArgumentException("loadAll entities is null or empty!");
 		}
-		return dialectFactory.loadAll(sqlToyContext, entities, cascadeTypes, lockMode, getDataSource(null));
+		if ((cascadeTypes == null || cascadeTypes.length == 0) && (cascadeAll || onlyCascade)) {
+			cascadeTypes = sqlToyContext.getEntityMeta(entities.get(0).getClass()).getCascadeTypes();
+		}
+		return dialectFactory.loadAll(sqlToyContext, entities, onlyCascade, cascadeTypes, lockMode, parallelConfig,
+				getDataSource(null));
 	}
 
 }

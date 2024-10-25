@@ -32,6 +32,8 @@ import org.sagacity.sqltoy.model.QueryResult;
 import org.sagacity.sqltoy.model.StoreResult;
 import org.sagacity.sqltoy.model.TableMeta;
 import org.sagacity.sqltoy.model.inner.QueryExecutorExtend;
+import org.sagacity.sqltoy.utils.BeanUtil;
+import org.sagacity.sqltoy.utils.StringUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -186,11 +188,11 @@ public class OracleDialect implements Dialect {
 						String sequence = entityMeta.getSequence() + ".nextval";
 						if (pkStrategy != null && pkStrategy.equals(PKStrategy.IDENTITY)) {
 							pkStrategy = PKStrategy.SEQUENCE;
-							sequence = entityMeta.getFieldsMeta().get(entityMeta.getIdArray()[0]).getDefaultValue();
+							sequence = entityMeta.getFieldMeta(entityMeta.getIdArray()[0]).getDefaultValue();
 						}
-						return DialectUtils.getSaveOrUpdateSql(sqlToyContext.getUnifyFieldsHandler(), dbType,
-								entityMeta, pkStrategy, forceUpdateFields, VIRTUAL_TABLE, NVL_FUNCTION, sequence,
-								OracleDialectUtils.isAssignPKValue(pkStrategy), tableName);
+						return DialectUtils.getSaveOrUpdateSql(sqlToyContext, sqlToyContext.getUnifyFieldsHandler(),
+								dbType, entityMeta, pkStrategy, forceUpdateFields, VIRTUAL_TABLE, NVL_FUNCTION,
+								sequence, OracleDialectUtils.isAssignPKValue(pkStrategy), tableName);
 					}
 				}, reflectPropsHandler, conn, dbType, autoCommit);
 	}
@@ -216,7 +218,7 @@ public class OracleDialect implements Dialect {
 						String sequence = entityMeta.getSequence() + ".nextval";
 						if (pkStrategy != null && pkStrategy.equals(PKStrategy.IDENTITY)) {
 							pkStrategy = PKStrategy.SEQUENCE;
-							sequence = entityMeta.getFieldsMeta().get(entityMeta.getIdArray()[0]).getDefaultValue();
+							sequence = entityMeta.getFieldMeta(entityMeta.getIdArray()[0]).getDefaultValue();
 						}
 						return DialectExtUtils.mergeIgnore(sqlToyContext.getUnifyFieldsHandler(), dbType, entityMeta,
 								pkStrategy, VIRTUAL_TABLE, NVL_FUNCTION, sequence,
@@ -232,10 +234,11 @@ public class OracleDialect implements Dialect {
 	 * java.util.List, java.sql.Connection)
 	 */
 	@Override
-	public Serializable load(final SqlToyContext sqlToyContext, Serializable entity, List<Class> cascadeTypes,
-			LockMode lockMode, Connection conn, final Integer dbType, final String dialect, final String tableName)
-			throws Exception {
-		return OracleDialectUtils.load(sqlToyContext, entity, cascadeTypes, lockMode, conn, dbType, dialect, tableName);
+	public Serializable load(final SqlToyContext sqlToyContext, Serializable entity, boolean onlySubTables,
+			List<Class> cascadeTypes, LockMode lockMode, Connection conn, final Integer dbType, final String dialect,
+			final String tableName) throws Exception {
+		return OracleDialectUtils.load(sqlToyContext, entity, onlySubTables, cascadeTypes, lockMode, conn, dbType,
+				dialect, tableName);
 	}
 
 	/*
@@ -245,11 +248,11 @@ public class OracleDialect implements Dialect {
 	 * java.util.List, java.sql.Connection)
 	 */
 	@Override
-	public List<?> loadAll(final SqlToyContext sqlToyContext, List<?> entities, List<Class> cascadeTypes,
-			LockMode lockMode, Connection conn, final Integer dbType, final String dialect, final String tableName,
-			final int fetchSize, final int maxRows) throws Exception {
-		return OracleDialectUtils.loadAll(sqlToyContext, entities, cascadeTypes, lockMode, conn, dbType, tableName,
-				fetchSize, maxRows);
+	public List<?> loadAll(final SqlToyContext sqlToyContext, List<?> entities, boolean onlySubTables,
+			List<Class> cascadeTypes, LockMode lockMode, Connection conn, final Integer dbType, final String dialect,
+			final String tableName, final int fetchSize, final int maxRows) throws Exception {
+		return OracleDialectUtils.loadAll(sqlToyContext, entities, onlySubTables, cascadeTypes, lockMode, conn, dbType,
+				tableName, fetchSize, maxRows);
 	}
 
 	/*
@@ -267,7 +270,14 @@ public class OracleDialect implements Dialect {
 		// oracle identity本质是用sequence模拟(主键策略尽量少用跟数据库相关的)
 		if (pkStrategy != null && pkStrategy.equals(PKStrategy.IDENTITY)) {
 			pkStrategy = PKStrategy.SEQUENCE;
-			sequence = entityMeta.getFieldsMeta().get(entityMeta.getIdArray()[0]).getDefaultValue();
+			sequence = entityMeta.getFieldMeta(entityMeta.getIdArray()[0]).getDefaultValue();
+		}
+		// 主键值已经存在，则主键策略改为assign，避免跳号
+		if (pkStrategy != null && pkStrategy.equals(PKStrategy.SEQUENCE)) {
+			Object id = BeanUtil.getProperty(entity, entityMeta.getIdArray()[0]);
+			if (StringUtil.isNotBlank(id)) {
+				pkStrategy = PKStrategy.ASSIGN;
+			}
 		}
 		boolean isAssignPK = OracleDialectUtils.isAssignPKValue(pkStrategy);
 		String insertSql = DialectExtUtils.generateInsertSql(sqlToyContext.getUnifyFieldsHandler(), dbType, entityMeta,
@@ -280,7 +290,7 @@ public class OracleDialect implements Dialect {
 						String sequence = entityMeta.getSequence().concat(".nextval");
 						if (pkStrategy != null && pkStrategy.equals(PKStrategy.IDENTITY)) {
 							pkStrategy = PKStrategy.SEQUENCE;
-							sequence = entityMeta.getFieldsMeta().get(entityMeta.getIdArray()[0]).getDefaultValue();
+							sequence = entityMeta.getFieldMeta(entityMeta.getIdArray()[0]).getDefaultValue();
 						}
 						return DialectExtUtils.generateInsertSql(sqlToyContext.getUnifyFieldsHandler(), dbType,
 								entityMeta, pkStrategy, NVL_FUNCTION, sequence,
@@ -316,7 +326,7 @@ public class OracleDialect implements Dialect {
 		String sequence = entityMeta.getSequence().concat(".nextval");
 		if (pkStrategy != null && pkStrategy.equals(PKStrategy.IDENTITY)) {
 			pkStrategy = PKStrategy.SEQUENCE;
-			sequence = entityMeta.getFieldsMeta().get(entityMeta.getIdArray()[0]).getDefaultValue();
+			sequence = entityMeta.getFieldMeta(entityMeta.getIdArray()[0]).getDefaultValue();
 		}
 		String insertSql = DialectExtUtils.generateInsertSql(sqlToyContext.getUnifyFieldsHandler(), dbType, entityMeta,
 				pkStrategy, NVL_FUNCTION, sequence, isAssignPK, tableName);
@@ -344,12 +354,12 @@ public class OracleDialect implements Dialect {
 						String sequence = entityMeta.getSequence().concat(".nextval");
 						if (pkStrategy != null && pkStrategy.equals(PKStrategy.IDENTITY)) {
 							pkStrategy = PKStrategy.SEQUENCE;
-							sequence = entityMeta.getFieldsMeta().get(entityMeta.getIdArray()[0]).getDefaultValue();
+							sequence = entityMeta.getFieldMeta(entityMeta.getIdArray()[0]).getDefaultValue();
 						}
 						// virtual_table为dual
-						return DialectUtils.getSaveOrUpdateSql(sqlToyContext.getUnifyFieldsHandler(), dbType,
-								entityMeta, pkStrategy, forceUpdateFields, VIRTUAL_TABLE, NVL_FUNCTION, sequence,
-								OracleDialectUtils.isAssignPKValue(pkStrategy), null);
+						return DialectUtils.getSaveOrUpdateSql(sqlToyContext, sqlToyContext.getUnifyFieldsHandler(),
+								dbType, entityMeta, pkStrategy, forceUpdateFields, VIRTUAL_TABLE, NVL_FUNCTION,
+								sequence, OracleDialectUtils.isAssignPKValue(pkStrategy), null);
 					}
 				}, forceCascadeClass, subTableForceUpdateProps, conn, dbType, tableName);
 	}

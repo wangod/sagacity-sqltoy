@@ -29,6 +29,7 @@ import org.sagacity.sqltoy.model.IgnoreCaseSet;
 import org.sagacity.sqltoy.plugins.IUnifyFieldsHandler;
 import org.sagacity.sqltoy.utils.BeanUtil;
 import org.sagacity.sqltoy.utils.CollectionUtil;
+import org.sagacity.sqltoy.utils.DataSourceUtils;
 import org.sagacity.sqltoy.utils.DataSourceUtils.DBType;
 import org.sagacity.sqltoy.utils.DataSourceUtils.Dialect;
 import org.sagacity.sqltoy.utils.ReservedWordsUtil;
@@ -54,6 +55,7 @@ public class ClickHouseDialectUtils {
 	 * @todo 保存对象
 	 * @param sqlToyContext
 	 * @param entityMeta
+	 * @param pkStrategy
 	 * @param insertSql
 	 * @param entity
 	 * @param conn
@@ -61,9 +63,8 @@ public class ClickHouseDialectUtils {
 	 * @return
 	 * @throws Exception
 	 */
-	public static Object save(SqlToyContext sqlToyContext, final EntityMeta entityMeta, final String insertSql,
-			Serializable entity, final Connection conn, final Integer dbType) throws Exception {
-		PKStrategy pkStrategy = entityMeta.getIdStrategy();
+	public static Object save(SqlToyContext sqlToyContext, final EntityMeta entityMeta, PKStrategy pkStrategy,
+			final String insertSql, Serializable entity, final Connection conn, final Integer dbType) throws Exception {
 		final boolean isIdentity = (pkStrategy != null && pkStrategy.equals(PKStrategy.IDENTITY));
 		final boolean isSequence = (pkStrategy != null && pkStrategy.equals(PKStrategy.SEQUENCE));
 		String[] reflectColumns;
@@ -130,8 +131,8 @@ public class ClickHouseDialectUtils {
 		final Integer[] paramsType = entityMeta.getFieldsTypeArray();
 		PreparedStatement pst = null;
 		if (isIdentity || isSequence) {
-			pst = conn.prepareStatement(insertSql,
-					new String[] { entityMeta.getColumnName(entityMeta.getIdArray()[0]) });
+			pst = conn.prepareStatement(insertSql, new String[] { DataSourceUtils
+					.getReturnPrimaryKeyColumn(entityMeta.getColumnName(entityMeta.getIdArray()[0]), dbType) });
 		} else {
 			pst = conn.prepareStatement(insertSql);
 		}
@@ -560,21 +561,26 @@ public class ClickHouseDialectUtils {
 				new PreparedStatementResultHandler() {
 					@Override
 					public void execute(Object rowData, PreparedStatement pst, ResultSet rs) throws Exception {
-						pst.setString(1, tableName);
-						rs = pst.executeQuery();
-						Map<String, ColumnMeta> colComments = new HashMap<String, ColumnMeta>();
-						while (rs.next()) {
-							ColumnMeta colMeta = new ColumnMeta();
-							colMeta.setColName(rs.getString("COLUMN_NAME"));
-							colMeta.setComments(rs.getString("COMMENTS"));
-							colMeta.setPK("1".equals(rs.getString("PRIMARY_KEY")) ? true : false);
-							colMeta.setPartitionKey("1".equals(rs.getString("PARTITION_KEY")) ? true : false);
-							colComments.put(colMeta.getColName(), colMeta);
-						}
-						this.setResult(colComments);
-						if (rs != null) {
-							rs.close();
-							rs = null;
+						try {
+							pst.setString(1, tableName);
+							rs = pst.executeQuery();
+							Map<String, ColumnMeta> colComments = new HashMap<String, ColumnMeta>();
+							while (rs.next()) {
+								ColumnMeta colMeta = new ColumnMeta();
+								colMeta.setColName(rs.getString("COLUMN_NAME"));
+								colMeta.setComments(rs.getString("COMMENTS"));
+								colMeta.setPK("1".equals(rs.getString("PRIMARY_KEY")) ? true : false);
+								colMeta.setPartitionKey("1".equals(rs.getString("PARTITION_KEY")) ? true : false);
+								colComments.put(colMeta.getColName(), colMeta);
+							}
+							this.setResult(colComments);
+						} catch (Exception e) {
+							throw e;
+						} finally {
+							if (rs != null) {
+								rs.close();
+								rs = null;
+							}
 						}
 					}
 				});

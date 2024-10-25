@@ -3,6 +3,7 @@ package org.sagacity.sqltoy.support;
 import java.io.Serializable;
 import java.lang.reflect.Array;
 import java.sql.Connection;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
@@ -89,6 +90,7 @@ import org.sagacity.sqltoy.utils.BeanUtil;
 import org.sagacity.sqltoy.utils.BeanWrapper;
 import org.sagacity.sqltoy.utils.DataSourceUtils;
 import org.sagacity.sqltoy.utils.DateUtil;
+import org.sagacity.sqltoy.utils.IdUtil;
 import org.sagacity.sqltoy.utils.MapperUtils;
 import org.sagacity.sqltoy.utils.QueryExecutorBuilder;
 import org.sagacity.sqltoy.utils.ReservedWordsUtil;
@@ -179,7 +181,7 @@ public class SqlToyDaoSupport {
 		// 提供一个扩展，让开发者在特殊场景下可以自行定义dataSourceSelector实现数据源的选择和获取
 		DataSourceSelector dataSourceSelector = sqlToyContext.getDataSourceSelector();
 		return dataSourceSelector.getDataSource(sqlToyContext.getAppContext(), pointDataSource, sqlDataSource,
-				this.dataSource, sqlToyContext.getDefaultDataSource());
+				dataSource, sqlToyContext.getDefaultDataSource());
 	}
 
 	/**
@@ -328,8 +330,7 @@ public class SqlToyDaoSupport {
 	 * @see isUnique(final Serializable entity, final String[] paramsNamed)
 	 */
 	protected boolean isUnique(final UniqueExecutor uniqueExecutor) {
-		return dialectFactory.isUnique(sqlToyContext, uniqueExecutor,
-				this.getDataSource(uniqueExecutor.getDataSource()));
+		return dialectFactory.isUnique(sqlToyContext, uniqueExecutor, getDataSource(uniqueExecutor.getDataSource()));
 	}
 
 	protected Long getCountBySql(final String sqlOrSqlId, final Map<String, Object> paramsMap) {
@@ -371,7 +372,7 @@ public class SqlToyDaoSupport {
 		SqlToyConfig sqlToyConfig = sqlToyContext.getSqlToyConfig(queryExecutor, SqlType.search,
 				getDialect(extend.dataSource));
 		Long result = dialectFactory.getCountBySql(sqlToyContext, queryExecutor, sqlToyConfig,
-				this.getDataSource(extend.dataSource, sqlToyConfig));
+				getDataSource(extend.dataSource, sqlToyConfig));
 		// 产品化场景，适配其他数据库验证查询(仅仅在设置了redoDataSources时生效)
 		CrossDbAdapter.redoCountQuery(sqlToyContext, dialectFactory, queryExecutor);
 		return result;
@@ -477,7 +478,7 @@ public class SqlToyDaoSupport {
 		}
 		EntityMeta entityMeta = this.getEntityMeta(entity.getClass());
 		if (SqlConfigParseUtils.isNamedQuery(entityMeta.getLoadSql(null))) {
-			return (T) this.loadBySql(entityMeta.getLoadSql(null), entity);
+			return (T) loadBySql(entityMeta.getLoadSql(null), entity);
 		}
 		return load(entity, null, null);
 	}
@@ -500,7 +501,7 @@ public class SqlToyDaoSupport {
 	 * @return
 	 */
 	protected <T extends Serializable> T load(final T entity, final LockMode lockMode, final DataSource dataSource) {
-		return dialectFactory.load(sqlToyContext, entity, null, lockMode, this.getDataSource(dataSource));
+		return dialectFactory.load(sqlToyContext, entity, false, null, lockMode, getDataSource(dataSource));
 	}
 
 	/**
@@ -519,7 +520,7 @@ public class SqlToyDaoSupport {
 		if (cascades == null || cascades.length == 0) {
 			cascades = getEntityMeta(entity.getClass()).getCascadeTypes();
 		}
-		return dialectFactory.load(sqlToyContext, entity, cascades, lockMode, this.getDataSource(null));
+		return dialectFactory.load(sqlToyContext, entity, false, cascades, lockMode, getDataSource(null));
 	}
 
 	/**
@@ -529,7 +530,7 @@ public class SqlToyDaoSupport {
 	 * @return
 	 */
 	protected <T extends Serializable> List<T> loadAll(final List<T> entities, final LockMode lockMode) {
-		return dialectFactory.loadAll(sqlToyContext, entities, null, lockMode, this.getDataSource(null));
+		return dialectFactory.loadAll(sqlToyContext, entities, null, null, lockMode, null, getDataSource(null));
 	}
 
 	/**
@@ -569,18 +570,25 @@ public class SqlToyDaoSupport {
 			realIds = ids;
 		}
 		List<T> entities = BeanUtil.wrapEntities(sqlToyContext.getTypeHandler(), entityMeta, entityClass, realIds);
-		return dialectFactory.loadAll(sqlToyContext, entities, null, lockMode, this.getDataSource(null));
+		return dialectFactory.loadAll(sqlToyContext, entities, null, null, lockMode, null, getDataSource(null));
+	}
+
+	protected <T extends Serializable> List<T> loadAllCascade(final List<T> entities, final LockMode lockMode,
+			final Class... cascadeTypes) {
+		return loadAllCascade(entities, null, lockMode, cascadeTypes);
 	}
 
 	/**
 	 * @todo 批量对象级联加载,指定级联加载的子表
+	 * @param <T>
 	 * @param entities
+	 * @param onlySubTable
 	 * @param lockMode
 	 * @param cascadeTypes
 	 * @return
 	 */
-	protected <T extends Serializable> List<T> loadAllCascade(final List<T> entities, final LockMode lockMode,
-			final Class... cascadeTypes) {
+	protected <T extends Serializable> List<T> loadAllCascade(final List<T> entities, final Boolean onlySubTable,
+			final LockMode lockMode, final Class... cascadeTypes) {
 		if (entities == null || entities.isEmpty()) {
 			return entities;
 		}
@@ -588,7 +596,8 @@ public class SqlToyDaoSupport {
 		if (cascades == null || cascades.length == 0) {
 			cascades = getEntityMeta(entities.get(0).getClass()).getCascadeTypes();
 		}
-		return dialectFactory.loadAll(sqlToyContext, entities, cascades, lockMode, this.getDataSource(null));
+		return dialectFactory.loadAll(sqlToyContext, entities, onlySubTable, cascades, lockMode, null,
+				getDataSource(null));
 	}
 
 	protected <T> T loadBySql(final String sqlOrSqlId, final Map<String, Object> paramsMap, final Class<T> resultType) {
@@ -645,7 +654,7 @@ public class SqlToyDaoSupport {
 		SqlToyConfig sqlToyConfig = sqlToyContext.getSqlToyConfig(queryExecutor, SqlType.search,
 				getDialect(extend.dataSource));
 		QueryResult result = dialectFactory.findByQuery(sqlToyContext, queryExecutor, sqlToyConfig, null,
-				this.getDataSource(extend.dataSource, sqlToyConfig));
+				getDataSource(extend.dataSource, sqlToyConfig));
 		// 产品化场景，适配其他数据库验证查询(仅仅在设置了redoDataSources时生效)
 		CrossDbAdapter.redoQuery(sqlToyContext, dialectFactory, queryExecutor);
 		List rows = result.getRows();
@@ -746,7 +755,7 @@ public class SqlToyDaoSupport {
 			final Boolean autoCommit, final DataSource dataSource) {
 		SqlToyConfig sqlToyConfig = sqlToyContext.getSqlToyConfig(sqlOrSqlId, SqlType.update, getDialect(dataSource),
 				null);
-		return dialectFactory.batchUpdate(sqlToyContext, sqlToyConfig, dataSet, batchSize, null, null, autoCommit,
+		return dialectFactory.batchUpdate(sqlToyContext, sqlToyConfig, dataSet, batchSize, null, null, null, autoCommit,
 				getDataSource(dataSource, sqlToyConfig));
 	}
 
@@ -931,7 +940,7 @@ public class SqlToyDaoSupport {
 		SqlToyConfig sqlToyConfig = sqlToyContext.getSqlToyConfig(queryExecutor, SqlType.search,
 				getDialect(queryExecutor.getInnerModel().dataSource));
 		QueryResult result = dialectFactory.findTop(sqlToyContext, queryExecutor, sqlToyConfig, topSize,
-				this.getDataSource(queryExecutor.getInnerModel().dataSource, sqlToyConfig));
+				getDataSource(queryExecutor.getInnerModel().dataSource, sqlToyConfig));
 		// 产品化场景，适配其他数据库验证查询(仅仅在设置了redoDataSources时生效)
 		CrossDbAdapter.redoTopQuery(sqlToyContext, dialectFactory, queryExecutor, topSize);
 		return result;
@@ -948,7 +957,7 @@ public class SqlToyDaoSupport {
 		SqlToyConfig sqlToyConfig = sqlToyContext.getSqlToyConfig(queryExecutor, SqlType.search,
 				getDialect(queryExecutor.getInnerModel().dataSource));
 		QueryResult result = dialectFactory.getRandomResult(sqlToyContext, queryExecutor, sqlToyConfig, randomCount,
-				this.getDataSource(queryExecutor.getInnerModel().dataSource, sqlToyConfig));
+				getDataSource(queryExecutor.getInnerModel().dataSource, sqlToyConfig));
 		// 产品化场景，适配其他数据库验证查询(仅仅在设置了redoDataSources时生效)
 		CrossDbAdapter.redoRandomQuery(sqlToyContext, dialectFactory, queryExecutor, randomCount);
 		return result;
@@ -987,7 +996,7 @@ public class SqlToyDaoSupport {
 		if (StringUtil.isBlank(tableName)) {
 			throw new IllegalArgumentException("truncate tableName is blank or null,please check!");
 		}
-		this.executeSql("truncate table ".concat(tableName), null, null, autoCommit, this.getDataSource(dataSource));
+		executeSql("truncate table ".concat(tableName), null, null, autoCommit, this.getDataSource(dataSource));
 	}
 
 	/**
@@ -996,7 +1005,7 @@ public class SqlToyDaoSupport {
 	 * @return
 	 */
 	protected Object save(final Serializable entity) {
-		return this.save(entity, null);
+		return save(entity, null);
 	}
 
 	/**
@@ -1006,7 +1015,7 @@ public class SqlToyDaoSupport {
 	 * @return
 	 */
 	protected Object save(final Serializable entity, final DataSource dataSource) {
-		return dialectFactory.save(sqlToyContext, entity, this.getDataSource(dataSource));
+		return dialectFactory.save(sqlToyContext, entity, getDataSource(dataSource));
 	}
 
 	/**
@@ -1027,8 +1036,8 @@ public class SqlToyDaoSupport {
 	 * @return
 	 */
 	protected <T extends Serializable> Long saveAll(final List<T> entities, final DataSource dataSource) {
-		return dialectFactory.saveAll(sqlToyContext, entities, sqlToyContext.getBatchSize(), null,
-				this.getDataSource(dataSource), null);
+		return dialectFactory.saveAll(sqlToyContext, entities, sqlToyContext.getBatchSize(), null, null,
+				getDataSource(dataSource), null);
 	}
 
 	/**
@@ -1037,7 +1046,7 @@ public class SqlToyDaoSupport {
 	 * @return
 	 */
 	protected <T extends Serializable> Long saveAllIgnoreExist(final List<T> entities) {
-		return this.saveAllIgnoreExist(entities, null);
+		return saveAllIgnoreExist(entities, null);
 	}
 
 	/**
@@ -1047,8 +1056,8 @@ public class SqlToyDaoSupport {
 	 * @return
 	 */
 	protected <T extends Serializable> Long saveAllIgnoreExist(final List<T> entities, final DataSource dataSource) {
-		return dialectFactory.saveAllIgnoreExist(sqlToyContext, entities, sqlToyContext.getBatchSize(), null,
-				this.getDataSource(dataSource), null);
+		return dialectFactory.saveAllIgnoreExist(sqlToyContext, entities, sqlToyContext.getBatchSize(), null, null,
+				getDataSource(dataSource), null);
 	}
 
 	/**
@@ -1111,7 +1120,7 @@ public class SqlToyDaoSupport {
 			BeanUtil.setProperty(entity, dataVersion.getField(), verStr);
 		}
 		return dialectFactory.update(sqlToyContext, entity, forceUpdateProps, false, null, null,
-				this.getDataSource(dataSource));
+				getDataSource(dataSource));
 	}
 
 	/**
@@ -1125,7 +1134,7 @@ public class SqlToyDaoSupport {
 	protected Long updateCascade(final Serializable entity, final String[] forceUpdateProps,
 			final Class[] forceCascadeClasses, final HashMap<Class, String[]> subTableForceUpdateProps) {
 		return dialectFactory.update(sqlToyContext, entity, forceUpdateProps, true, forceCascadeClasses,
-				subTableForceUpdateProps, this.getDataSource(null));
+				subTableForceUpdateProps, getDataSource(null));
 	}
 
 	/**
@@ -1165,7 +1174,7 @@ public class SqlToyDaoSupport {
 		}
 		EntityMeta entityMeta = getEntityMeta(entity.getClass());
 		return this.update(entity, (entityMeta == null) ? null : entityMeta.getRejectIdFieldArray(),
-				this.getDataSource(dataSource));
+				getDataSource(dataSource));
 	}
 
 	/**
@@ -1190,7 +1199,7 @@ public class SqlToyDaoSupport {
 	protected <T extends Serializable> Long updateAll(final List<T> entities, final String[] forceUpdateProps,
 			final DataSource dataSource) {
 		return dialectFactory.updateAll(sqlToyContext, entities, sqlToyContext.getBatchSize(), null, forceUpdateProps,
-				null, this.getDataSource(dataSource), null);
+				null, null, getDataSource(dataSource), null);
 	}
 
 	/**
@@ -1257,7 +1266,7 @@ public class SqlToyDaoSupport {
 				return update(entity, forceUpdateProps, dataSource);
 			}
 		}
-		return dialectFactory.saveOrUpdate(sqlToyContext, entity, forceUpdateProps, this.getDataSource(dataSource));
+		return dialectFactory.saveOrUpdate(sqlToyContext, entity, forceUpdateProps, getDataSource(dataSource));
 	}
 
 	/**
@@ -1282,7 +1291,7 @@ public class SqlToyDaoSupport {
 	protected <T extends Serializable> Long saveOrUpdateAll(final List<T> entities, final String[] forceUpdateProps,
 			final DataSource dataSource) {
 		return dialectFactory.saveOrUpdateAll(sqlToyContext, entities, sqlToyContext.getBatchSize(), forceUpdateProps,
-				null, this.getDataSource(dataSource), null);
+				null, null, getDataSource(dataSource), null);
 	}
 
 	/**
@@ -1291,11 +1300,11 @@ public class SqlToyDaoSupport {
 	 * @return
 	 */
 	protected Long delete(final Serializable entity) {
-		return dialectFactory.delete(sqlToyContext, entity, this.getDataSource(null));
+		return dialectFactory.delete(sqlToyContext, entity, getDataSource(null));
 	}
 
 	protected Long delete(final Serializable entity, final DataSource dataSource) {
-		return dialectFactory.delete(sqlToyContext, entity, this.getDataSource(dataSource));
+		return dialectFactory.delete(sqlToyContext, entity, getDataSource(dataSource));
 	}
 
 	/**
@@ -1345,7 +1354,7 @@ public class SqlToyDaoSupport {
 	}
 
 	protected <T extends Serializable> Long deleteAll(final List<T> entities) {
-		return this.deleteAll(entities, null);
+		return deleteAll(entities, null);
 	}
 
 	/**
@@ -1356,8 +1365,8 @@ public class SqlToyDaoSupport {
 	 * @return
 	 */
 	protected <T extends Serializable> Long deleteAll(final List<T> entities, final DataSource dataSource) {
-		return dialectFactory.deleteAll(sqlToyContext, entities, sqlToyContext.getBatchSize(),
-				this.getDataSource(dataSource), null);
+		return dialectFactory.deleteAll(sqlToyContext, entities, sqlToyContext.getBatchSize(), null,
+				getDataSource(dataSource), null);
 	}
 
 	/**
@@ -1394,7 +1403,7 @@ public class SqlToyDaoSupport {
 		SqlToyConfig sqlToyConfig = sqlToyContext.getSqlToyConfig(queryExecutor, SqlType.search,
 				getDialect(queryExecutor.getInnerModel().dataSource));
 		return dialectFactory.updateFetch(sqlToyContext, queryExecutor, sqlToyConfig, updateRowHandler,
-				this.getDataSource(queryExecutor.getInnerModel().dataSource, sqlToyConfig)).getRows();
+				getDataSource(queryExecutor.getInnerModel().dataSource, sqlToyConfig)).getRows();
 	}
 
 	/**
@@ -1435,15 +1444,14 @@ public class SqlToyDaoSupport {
 	 * @param dataSource
 	 */
 	protected void flush(DataSource dataSource) {
-		DataSourceUtils.processDataSource(sqlToyContext, this.getDataSource(dataSource),
-				new DataSourceCallbackHandler() {
-					@Override
-					public void doConnection(Connection conn, Integer dbType, String dialect) throws Exception {
-						if (!conn.isClosed()) {
-							conn.commit();
-						}
-					}
-				});
+		DataSourceUtils.processDataSource(sqlToyContext, getDataSource(dataSource), new DataSourceCallbackHandler() {
+			@Override
+			public void doConnection(Connection conn, Integer dbType, String dialect) throws Exception {
+				if (!conn.isClosed()) {
+					conn.commit();
+				}
+			}
+		});
 	}
 
 	/**
@@ -1459,7 +1467,7 @@ public class SqlToyDaoSupport {
 		if (distributeIdGenerator == null) {
 			try {
 				distributeIdGenerator = (DistributeIdGenerator) Class
-						.forName(sqlToyContext.getDistributeIdGeneratorClass()).newInstance();
+						.forName(sqlToyContext.getDistributeIdGeneratorClass()).getDeclaredConstructor().newInstance();
 				distributeIdGenerator.initialize(sqlToyContext.getAppContext());
 			} catch (Exception e) {
 				e.printStackTrace();
@@ -1475,7 +1483,7 @@ public class SqlToyDaoSupport {
 	 * @return
 	 */
 	protected String generateBizId(Serializable entity) {
-		EntityMeta entityMeta = this.getEntityMeta(entity.getClass());
+		EntityMeta entityMeta = getEntityMeta(entity.getClass());
 		if (entityMeta == null || !entityMeta.isHasBizIdConfig()) {
 			throw new IllegalArgumentException(
 					StringUtil.fillArgs("对象:{},没有配置业务主键生成策略,请检查POJO 的业务主键配置!", entity.getClass().getName()));
@@ -1500,6 +1508,35 @@ public class SqlToyDaoSupport {
 		return idGenerator.getId(entityMeta.getTableName(), entityMeta.getBizIdSignature(),
 				entityMeta.getBizIdRelatedColumns(), relatedColValue, new Date(), businessIdType,
 				entityMeta.getBizIdLength(), entityMeta.getBizIdSequenceSize()).toString();
+	}
+
+	/**
+	 * @TODO 根据指定的表名、业务码，业务码的属性和值map，动态获取业务主键值 例如:generateBizId("sag_test",
+	 *       "HW@case(orderType,SALE,SC,BUY,PO)@day(yyMMdd)",
+	 *       MapKit.map("orderType", "SALE"), null, 12, 2);
+	 * @param tableName
+	 * @param signature    一个表达式字符串，支持@case(name,value1,then1,val2,then2)
+	 *                     和 @day(yyMMdd)或@day(yyyyMMdd)、@substr(name,start,length)
+	 *                     等
+	 * @param keyValues
+	 * @param bizDate      在signature为空时生效
+	 * @param length
+	 * @param sequenceSize
+	 * @return
+	 */
+	protected String generateBizId(String tableName, String signature, Map<String, Object> keyValues, LocalDate bizDate,
+			int length, int sequenceSize) {
+		if (distributeIdGenerator == null) {
+			try {
+				distributeIdGenerator = (DistributeIdGenerator) Class
+						.forName(sqlToyContext.getDistributeIdGeneratorClass()).getDeclaredConstructor().newInstance();
+				distributeIdGenerator.initialize(sqlToyContext.getAppContext());
+			} catch (Exception e) {
+				e.printStackTrace();
+				throw new DataAccessException("实例化分布式id产生器失败:" + e.getMessage());
+			}
+		}
+		return IdUtil.getId(distributeIdGenerator, tableName, signature, keyValues, bizDate, length, sequenceSize);
 	}
 
 	/**

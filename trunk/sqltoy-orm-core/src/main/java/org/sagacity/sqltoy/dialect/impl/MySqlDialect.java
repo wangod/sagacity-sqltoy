@@ -17,6 +17,7 @@ import org.sagacity.sqltoy.callback.GenerateSqlHandler;
 import org.sagacity.sqltoy.callback.ReflectPropsHandler;
 import org.sagacity.sqltoy.callback.UpdateRowHandler;
 import org.sagacity.sqltoy.config.model.EntityMeta;
+import org.sagacity.sqltoy.config.model.PKStrategy;
 import org.sagacity.sqltoy.config.model.SqlToyConfig;
 import org.sagacity.sqltoy.config.model.SqlType;
 import org.sagacity.sqltoy.dialect.Dialect;
@@ -169,6 +170,23 @@ public class MySqlDialect implements Dialect {
 
 	// mysql的on duplicate key update 针对非空字段先校验了insert导致无法走到update set
 	// xxx=ifnull(null,xxx)
+	// step1: create table
+	//
+	// CREATE TABLE TEST1 (
+	// ID varchar(100) NOT NULL,
+	// NAME varchar(100) NOT NULL,
+	// STATUS varchar(100) NOT NULL,
+	// PRIMARY KEY (ID)
+	// )
+	//
+	// step 2、insert record:
+	// insert into TEST1 (ID, NAME,STATUS ) values('4','test','6') ;
+	//
+	// step 3、execute insert on duplicate update (same PK)
+	//
+	// insert into TEST1 (ID, NAME,STATUS ) values('4',null,'6')
+	// on duplicate key update TEST1.NAME=ifnull(values(NAME),TEST1.NAME),
+	// TEST1.STATUS=ifnull(values(STATUS),TEST1.STATUS);
 	/*
 	 * (non-Javadoc)
 	 *
@@ -222,17 +240,17 @@ public class MySqlDialect implements Dialect {
 	 * java.util.List, java.sql.Connection)
 	 */
 	@Override
-	public Serializable load(final SqlToyContext sqlToyContext, Serializable entity, List<Class> cascadeTypes,
-			LockMode lockMode, Connection conn, final Integer dbType, final String dialect, final String tableName)
-			throws Exception {
+	public Serializable load(final SqlToyContext sqlToyContext, Serializable entity, boolean onlySubTables,
+			List<Class> cascadeTypes, LockMode lockMode, Connection conn, final Integer dbType, final String dialect,
+			final String tableName) throws Exception {
 		EntityMeta entityMeta = sqlToyContext.getEntityMeta(entity.getClass());
 		// 获取loadsql(loadsql 可以通过@loadSql进行改变，所以需要sqltoyContext重新获取)
 		SqlToyConfig sqlToyConfig = sqlToyContext.getSqlToyConfig(entityMeta.getLoadSql(tableName), SqlType.search,
 				dialect, null);
 		String loadSql = sqlToyConfig.getSql(dialect);
 		loadSql = loadSql.concat(getLockSql(loadSql, dbType, lockMode));
-		return (Serializable) DialectUtils.load(sqlToyContext, sqlToyConfig, loadSql, entityMeta, entity, cascadeTypes,
-				conn, dbType);
+		return (Serializable) DialectUtils.load(sqlToyContext, sqlToyConfig, loadSql, entityMeta, entity, onlySubTables,
+				cascadeTypes, conn, dbType);
 	}
 
 	/*
@@ -242,11 +260,11 @@ public class MySqlDialect implements Dialect {
 	 * java.util.List, java.sql.Connection)
 	 */
 	@Override
-	public List<?> loadAll(final SqlToyContext sqlToyContext, List<?> entities, List<Class> cascadeTypes,
-			LockMode lockMode, Connection conn, final Integer dbType, final String dialect, final String tableName,
-			final int fetchSize, final int maxRows) throws Exception {
-		return DialectUtils.loadAll(sqlToyContext, entities, cascadeTypes, lockMode, conn, dbType, tableName,
-				(sql, dbTypeValue, lockedMode) -> {
+	public List<?> loadAll(final SqlToyContext sqlToyContext, List<?> entities, boolean onlySubTables,
+			List<Class> cascadeTypes, LockMode lockMode, Connection conn, final Integer dbType, final String dialect,
+			final String tableName, final int fetchSize, final int maxRows) throws Exception {
+		return DialectUtils.loadAll(sqlToyContext, entities, onlySubTables, cascadeTypes, lockMode, conn, dbType,
+				tableName, (sql, dbTypeValue, lockedMode) -> {
 					return getLockSql(sql, dbTypeValue, lockedMode);
 				}, fetchSize, maxRows);
 	}
@@ -262,11 +280,12 @@ public class MySqlDialect implements Dialect {
 			final String dialect, final String tableName) throws Exception {
 		// mysql只支持identity,sequence 值忽略,mysql identity可以手工插入
 		EntityMeta entityMeta = sqlToyContext.getEntityMeta(entity.getClass());
-		boolean isAssignPK = MySqlDialectUtils.isAssignPKValue(entityMeta.getIdStrategy());
+		// save行为根据主键是否赋值情况调整最终的主键策略
+		PKStrategy pkStrategy = DialectUtils.getSavePKStrategy(entityMeta, entity, dbType);
+		boolean isAssignPK = MySqlDialectUtils.isAssignPKValue(pkStrategy);
 		String insertSql = DialectExtUtils.generateInsertSql(sqlToyContext.getUnifyFieldsHandler(), dbType, entityMeta,
-				entityMeta.getIdStrategy(), NVL_FUNCTION, "NEXTVAL FOR " + entityMeta.getSequence(), isAssignPK,
-				tableName);
-		return DialectUtils.save(sqlToyContext, entityMeta, entityMeta.getIdStrategy(), isAssignPK, insertSql, entity,
+				pkStrategy, NVL_FUNCTION, "NEXTVAL FOR " + entityMeta.getSequence(), isAssignPK, tableName);
+		return DialectUtils.save(sqlToyContext, entityMeta, pkStrategy, isAssignPK, insertSql, entity,
 				new GenerateSqlHandler() {
 					@Override
 					public String generateSql(EntityMeta entityMeta, String[] forceUpdateField) {

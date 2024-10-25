@@ -1,22 +1,20 @@
 package org.sagacity.sqltoy;
 
-import java.awt.List;
 import java.lang.reflect.InvocationTargetException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
-import org.sagacity.sqltoy.config.model.DataType;
 import org.sagacity.sqltoy.demo.vo.A1;
 import org.sagacity.sqltoy.demo.vo.A2;
 import org.sagacity.sqltoy.demo.vo.B1;
@@ -28,8 +26,7 @@ import org.sagacity.sqltoy.utils.BeanUtil;
 import org.sagacity.sqltoy.utils.MapperUtils;
 import org.sagacity.sqltoy.utils.StringUtil;
 
-import com.alibaba.fastjson.JSON;
-import com.google.common.collect.Lists;
+import com.alibaba.fastjson2.JSON;
 
 public class SqlToyConstantsTest {
 	@Test
@@ -50,25 +47,21 @@ public class SqlToyConstantsTest {
 
 	@Test
 	public void rtrim() {
-		Pattern COMPARE_PATTERN = Pattern.compile("(!=|<>|\\^=|=|>=|<=)");
-		System.err.println(StringUtil.matches("where id!=1", COMPARE_PATTERN));
-		System.err.println(StringUtil.matches("where id<>1", COMPARE_PATTERN));
-		System.err.println(StringUtil.matches("where id<=1", COMPARE_PATTERN));
-		System.err.println(StringUtil.matches("where id=1", COMPARE_PATTERN));
 
-		Map map = new HashMap<String, Object>();
-		map.put("1", null);
-		System.err.println("map=" + map.containsKey("1"));
-		System.err.println(List.class.isAssignableFrom(ArrayList.class));
-		System.err.println(Collection.class.isAssignableFrom(List.class));
-		System.err.println(Map.class.isAssignableFrom(HashMap.class));
-		String[] abc = new String[2];
-		System.err.println(abc.getClass().isArray());
-		System.err.println(DataType.class.isEnum());
-		String idColumns = "ta.staff_id";
-		System.err.println(idColumns.replaceAll("ta\\.", ""));
-		System.err.println(idColumns.replaceAll("ta\\.", "tv."));
-		System.err.println("[" + "v  by bn 1 ".replaceAll("\\s+", "") + "]");
+		String value = ":name";
+		// value = "@(:name)";
+		int[] indexes = StringUtil.matchIndex(" ".concat(value).concat("+1"), SqlToyConstants.SQL_NAMED_PATTERN, 0);
+		Pattern DELETE_PATTERN = Pattern.compile("(?i)^\\s*delete\\s");
+		System.err.println(StringUtil.matches("delete from", DELETE_PATTERN));
+		if (indexes[1] == value.length() + 2) {
+			System.err.println("---------:name value=" + value);
+		}
+		value = "@(:name)";
+		indexes = StringUtil.matchIndex(value, SqlToyConstants.NOSQL_NAMED_PATTERN, 0);
+		if (indexes[1] == value.length()) {
+			System.err.println("---------@(:name)value=" + indexes[1] + "length=" + value.length());
+			System.err.println("---------@(:name)value=" + value);
+		}
 	}
 
 	@Test
@@ -83,6 +76,56 @@ public class SqlToyConstantsTest {
 		System.err.println(String.class.getTypeName());
 		System.err.println(int.class.getTypeName());
 		System.err.println(Long.parseLong("20211111102134"));
+	}
+
+	@Test
+	public void testSql() {
+		String columns = "(";
+		String condition = "(";
+		String[] ids = { "id", "code" };
+		String colName;
+		StringBuilder loadSql = new StringBuilder("select * from table where ");
+		int dataSize = 5;
+		for (int i = 0; i < ids.length; i++) {
+			colName = ids[i];
+			if (i > 0) {
+				columns = columns.concat(",");
+				condition = condition.concat(",");
+			}
+			condition = condition.concat("?");
+			columns = columns.concat(colName);
+		}
+		condition = condition.concat(")");
+		columns = columns.concat(")");
+		StringBuilder conditionStr = new StringBuilder();
+		int groupIndex = 0;
+		int groupCnt = 0;
+		int groupSize = 10;
+		if (dataSize > groupSize) {
+			loadSql.append(" ( ");
+		}
+		for (int i = 0; i < dataSize; i++) {
+			if (groupIndex > 0) {
+				conditionStr.append(",");
+			}
+			conditionStr.append(condition);
+			groupIndex++;
+			// in 最大支持1000
+			if (((i + 1) % groupSize) == 0 || i + 1 == dataSize) {
+				if (groupCnt > 0) {
+					loadSql.append(" or ");
+				}
+				loadSql.append(columns).append(" in (").append(conditionStr.toString()).append(")");
+				groupIndex = 0;
+				groupCnt++;
+				// 清空
+				conditionStr.setLength(0);
+			}
+		}
+		if (dataSize > groupSize) {
+			loadSql.append(" ) ");
+		}
+		System.err.print(loadSql.toString());
 	}
 
 	@Test
@@ -115,11 +158,14 @@ public class SqlToyConstantsTest {
 
 	@Test
 	public void testBeanInfo1() {
-		String sql = SqlToyConstants.MERGE_ALIAS_ON + " ta.name=tv.name)";
-		int onTenantIndex = sql.indexOf(SqlToyConstants.MERGE_ALIAS_ON);
-		int end = onTenantIndex + SqlToyConstants.MERGE_ALIAS_ON.length();
-		String aliasName = sql.substring(end, sql.indexOf(".", end)).trim();
-		System.err.println("[" + aliasName + "]");
+		String sql = "id=:id and t1 ";
+		Pattern IF_ELSE_PATTERN = Pattern.compile("(?i)\\@(((if|elseif|else)\\s*\\()|else\\W)");
+		System.err.println(sql + "结果:" + StringUtil.matches("@if() and ", IF_ELSE_PATTERN));
+		System.err.println(sql + "结果:" + StringUtil.matches("@else and ", IF_ELSE_PATTERN));
+		System.err.println(sql + "结果:" + StringUtil.matches("@else() and ", IF_ELSE_PATTERN));
+		System.err.println(sql + "结果:" + StringUtil.matches("@elseif() and", IF_ELSE_PATTERN));
+		System.err.println(sql + "结果:" + StringUtil.matches("@else () and ", IF_ELSE_PATTERN));
+
 	}
 
 	@Test
@@ -133,6 +179,42 @@ public class SqlToyConstantsTest {
 	}
 
 	public static void main(String[] args) {
+		List<C1> c1List = new ArrayList();
+		c1List.add(new C1() {
+			{
+				setIntNum(3001);
+				setIntegerNum(3002);
+				setStr("i am c1 string. 。。。。");
+				setDecimal(BigDecimal.ONE);
+				setShortNum(Short.valueOf("399"));
+				setShortTNum(Short.valueOf("398"));
+				setDate(new Date());
+			}
+		});
+		c1List.add(new C1() {
+			{
+				setIntNum(3003);
+				setIntegerNum(3004);
+				setStr("i am c2 string. 。。。。");
+				setDecimal(BigDecimal.ONE);
+				setShortNum(Short.valueOf("389"));
+				setShortTNum(Short.valueOf("388"));
+				setDate(new Date());
+			}
+		});
+
+		c1List.add(new C1() {
+			{
+				setIntNum(3005);
+				setIntegerNum(3006);
+				setStr("i am c3 string. 。。。。");
+				setDecimal(BigDecimal.ONE);
+				setShortNum(Short.valueOf("379"));
+				setShortTNum(Short.valueOf("378"));
+				setDate(new Date());
+			}
+		});
+
 		A1 aa = new A1() {
 			{
 				setIntNum(1001);
@@ -153,37 +235,7 @@ public class SqlToyConstantsTest {
 						setDate(new Date());
 					}
 				});
-				setC(Lists.newArrayList(new C1() {
-					{
-						setIntNum(3001);
-						setIntegerNum(3002);
-						setStr("i am c1 string. 。。。。");
-						setDecimal(BigDecimal.ONE);
-						setShortNum(Short.valueOf("399"));
-						setShortTNum(Short.valueOf("398"));
-						setDate(new Date());
-					}
-				}, new C1() {
-					{
-						setIntNum(3003);
-						setIntegerNum(3004);
-						setStr("i am c2 string. 。。。。");
-						setDecimal(BigDecimal.ONE);
-						setShortNum(Short.valueOf("389"));
-						setShortTNum(Short.valueOf("388"));
-						setDate(new Date());
-					}
-				}, new C1() {
-					{
-						setIntNum(3005);
-						setIntegerNum(3006);
-						setStr("i am c3 string. 。。。。");
-						setDecimal(BigDecimal.ONE);
-						setShortNum(Short.valueOf("379"));
-						setShortTNum(Short.valueOf("378"));
-						setDate(new Date());
-					}
-				}));
+				setC(c1List);
 			}
 		};
 

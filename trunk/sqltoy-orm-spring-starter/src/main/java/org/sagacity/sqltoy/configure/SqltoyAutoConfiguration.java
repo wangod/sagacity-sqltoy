@@ -1,6 +1,17 @@
 package org.sagacity.sqltoy.configure;
 
-import com.alibaba.ttl.threadpool.TtlExecutors;
+import static java.lang.System.err;
+
+import java.io.IOException;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
+import java.util.stream.Collectors;
+
 import org.sagacity.sqltoy.SqlToyContext;
 import org.sagacity.sqltoy.config.SqlScriptLoader;
 import org.sagacity.sqltoy.config.model.ElasticEndpoint;
@@ -11,7 +22,13 @@ import org.sagacity.sqltoy.dao.impl.SqlToyLazyDaoImpl;
 import org.sagacity.sqltoy.integration.ConnectionFactory;
 import org.sagacity.sqltoy.integration.impl.SpringAppContext;
 import org.sagacity.sqltoy.integration.impl.SpringConnectionFactory;
-import org.sagacity.sqltoy.plugins.*;
+import org.sagacity.sqltoy.model.IgnoreKeyCaseMap;
+import org.sagacity.sqltoy.plugins.FilterHandler;
+import org.sagacity.sqltoy.plugins.FirstBizCodeTrace;
+import org.sagacity.sqltoy.plugins.IUnifyFieldsHandler;
+import org.sagacity.sqltoy.plugins.OverTimeSqlHandler;
+import org.sagacity.sqltoy.plugins.SqlInterceptor;
+import org.sagacity.sqltoy.plugins.TypeHandler;
 import org.sagacity.sqltoy.plugins.datasource.DataSourceSelector;
 import org.sagacity.sqltoy.plugins.ddl.DialectDDLGenerator;
 import org.sagacity.sqltoy.plugins.formater.SqlFormater;
@@ -34,23 +51,14 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-import java.io.IOException;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Executor;
-import java.util.stream.Collectors;
-
-import static java.lang.System.err;
+import com.alibaba.ttl.threadpool.TtlExecutors;
 
 /**
  * @author wolf
  * @version v1.0, Date:2018年12月26日
  * @description sqltoy 自动配置类
  * @modify {Date:2020-2-20,完善配置支持es等,实现完整功能}
+ * @modify {Date:2024-8-10,修复项目文件路径存在空格等特殊符号场景下无法加载sql.xml文件的问题}
  */
 //@Configuration springboot2.x
 //@AutoConfiguration springboot3.x
@@ -59,9 +67,6 @@ import static java.lang.System.err;
 public class SqltoyAutoConfiguration {
 	@Autowired
 	private ApplicationContext applicationContext;
-
-	// @Autowired
-	// private SqlToyContextProperties properties;
 
 	@Autowired
 	private ResourcePatternResolver resourcePatternResolver;
@@ -153,11 +158,12 @@ public class SqltoyAutoConfiguration {
 		// sql 文件资源路径
 		List<String> resList = new ArrayList<String>();
 		String sqlResourcesDir = properties.getSqlResourcesDir();
+		String charset = StringUtil.ifBlank(properties.getEncoding(), "UTF-8");
 		if (sqlResourcesDir != null && sqlResourcesDir.length() > 0) {
 			Set<String> sqlDirSet = this.strSplitTrim(sqlResourcesDir);
 			for (String dir : sqlDirSet) {
 				SqlScriptLoader.checkSqlResourcesDir(dir);
-				this.scanResources(resList, dir, "*.sql.xml");
+				this.scanResources(resList, dir, "*.sql.xml", charset);
 			}
 			// 设置dir已经转为resourceList标记
 			SqlScriptLoader.setResourcesDirToList(true);
@@ -231,7 +237,7 @@ public class SqltoyAutoConfiguration {
 				if (dir.endsWith(".xml")) {
 					translateConfigResourceList.add(dir);
 				} else {
-					this.scanResources(translateConfigResourceList, dir, "*.xml");
+					this.scanResources(translateConfigResourceList, dir, "*.xml", charset);
 				}
 			}
 			sqlToyContext.setTranslateConfig(translateConfigResourceList.stream().collect(Collectors.joining(",")));
@@ -266,6 +272,11 @@ public class SqltoyAutoConfiguration {
 		sqlToyContext.setUpdateTipCount(properties.getUpdateTipCount());
 		if (properties.getOverPageToFirst() != null) {
 			sqlToyContext.setOverPageToFirst(properties.getOverPageToFirst());
+		}
+		// 单记录保存采用identity、sequence主键策略，并返回主键值时，字段名称大小写处理(lower/upper)
+		if (properties.getDialectReturnPrimaryColumnCase() != null) {
+			sqlToyContext.setDialectReturnPrimaryColumnCase(
+					new IgnoreKeyCaseMap<>(properties.getDialectReturnPrimaryColumnCase()));
 		}
 		// 设置公共统一属性的处理器
 		String unfiyHandler = properties.getUnifyFieldsHandler();
@@ -344,6 +355,18 @@ public class SqltoyAutoConfiguration {
 			else if (translateCacheManager.contains(".")) {
 				sqlToyContext.setTranslateCacheManager((TranslateCacheManager) Class.forName(translateCacheManager)
 						.getDeclaredConstructor().newInstance());
+			}
+		}
+
+		// 自定义业务代码调用点
+		String firstBizCodeTrace = properties.getFirstBizCodeTrace();
+		if (StringUtil.isNotBlank(firstBizCodeTrace)) {
+			if (applicationContext.containsBean(firstBizCodeTrace)) {
+				sqlToyContext.setFirstBizCodeTrace((FirstBizCodeTrace) applicationContext.getBean(firstBizCodeTrace));
+			} // 包名和类名称
+			else if (firstBizCodeTrace.contains(".")) {
+				sqlToyContext.setFirstBizCodeTrace(
+						(FirstBizCodeTrace) Class.forName(firstBizCodeTrace).getDeclaredConstructor().newInstance());
 			}
 		}
 
@@ -495,23 +518,26 @@ public class SqltoyAutoConfiguration {
 	 * @param resList
 	 * @param dir
 	 * @param suffix
+	 * @param charset
 	 * @throws IOException
 	 */
-	private void scanResources(List<String> resList, String dir, String suffix) throws IOException {
+	private void scanResources(List<String> resList, String dir, String suffix, String charset) throws IOException {
 		dir += (dir.endsWith("/") ? "" : "/") + "**/" + suffix;
 		Resource[] resources = resourcePatternResolver
 				.getResources(dir.replaceFirst("classpath:", ResourcePatternResolver.CLASSPATH_ALL_URL_PREFIX));
 		// 遍历资源目录树
 		URL url;
 		String[] strs;
+		String path;
 		for (Resource resource : resources) {
 			url = resource.getURL();
+			path = url.getPath();
 			if ("jar".equals(url.getProtocol())) {
-				strs = url.getPath().split("!/");
-				resList.add(strs[strs.length - 1]);
-			} else {
-				resList.add(url.getPath());
+				strs = path.split("!/");
+				path = strs[strs.length - 1];
 			}
+			resList.add(path.replaceAll("%23", "#").replaceAll("%25", "%").replaceAll("%26", "&").replaceAll("%2B", "+")
+					.replaceAll("%3D", "=").replaceAll("%20", " ").replaceAll("%2E", ".").replaceAll("%3A", ":"));
 		}
 	}
 

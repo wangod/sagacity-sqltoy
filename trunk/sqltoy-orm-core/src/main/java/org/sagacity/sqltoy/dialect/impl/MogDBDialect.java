@@ -1,26 +1,39 @@
 package org.sagacity.sqltoy.dialect.impl;
 
+import java.io.Serializable;
+import java.sql.Connection;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+
 import org.sagacity.sqltoy.SqlToyContext;
-import org.sagacity.sqltoy.callback.*;
+import org.sagacity.sqltoy.callback.DecryptHandler;
+import org.sagacity.sqltoy.callback.GenerateSavePKStrategy;
+import org.sagacity.sqltoy.callback.GenerateSqlHandler;
+import org.sagacity.sqltoy.callback.ReflectPropsHandler;
+import org.sagacity.sqltoy.callback.UpdateRowHandler;
 import org.sagacity.sqltoy.config.model.EntityMeta;
 import org.sagacity.sqltoy.config.model.PKStrategy;
 import org.sagacity.sqltoy.config.model.SqlToyConfig;
 import org.sagacity.sqltoy.config.model.SqlType;
 import org.sagacity.sqltoy.dialect.Dialect;
 import org.sagacity.sqltoy.dialect.model.SavePKStrategy;
-import org.sagacity.sqltoy.dialect.utils.*;
-import org.sagacity.sqltoy.model.*;
+import org.sagacity.sqltoy.dialect.utils.DefaultDialectUtils;
+import org.sagacity.sqltoy.dialect.utils.DialectExtUtils;
+import org.sagacity.sqltoy.dialect.utils.DialectUtils;
+import org.sagacity.sqltoy.dialect.utils.GaussDialectUtils;
+import org.sagacity.sqltoy.dialect.utils.MogDBDialectUtils;
+import org.sagacity.sqltoy.dialect.utils.PostgreSqlDialectUtils;
+import org.sagacity.sqltoy.model.ColumnMeta;
+import org.sagacity.sqltoy.model.LockMode;
+import org.sagacity.sqltoy.model.QueryExecutor;
+import org.sagacity.sqltoy.model.QueryResult;
+import org.sagacity.sqltoy.model.StoreResult;
+import org.sagacity.sqltoy.model.TableMeta;
 import org.sagacity.sqltoy.model.inner.QueryExecutorExtend;
-import org.sagacity.sqltoy.utils.BeanUtil;
 import org.sagacity.sqltoy.utils.SqlUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.Serializable;
-import java.sql.Connection;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
 
 /**
  * @project sqltoy-orm
@@ -141,17 +154,17 @@ public class MogDBDialect implements Dialect {
 	 * org.sagacity.sqltoy.lock.LockMode, java.sql.Connection)
 	 */
 	@Override
-	public Serializable load(SqlToyContext sqlToyContext, Serializable entity, List<Class> cascadeTypes,
-			LockMode lockMode, Connection conn, final Integer dbType, final String dialect, final String tableName)
-			throws Exception {
+	public Serializable load(SqlToyContext sqlToyContext, Serializable entity, boolean onlySubTables,
+			List<Class> cascadeTypes, LockMode lockMode, Connection conn, final Integer dbType, final String dialect,
+			final String tableName) throws Exception {
 		EntityMeta entityMeta = sqlToyContext.getEntityMeta(entity.getClass());
 		// 获取loadsql(loadsql 可以通过@loadSql进行改变，所以需要sqltoyContext重新获取)
 		SqlToyConfig sqlToyConfig = sqlToyContext.getSqlToyConfig(entityMeta.getLoadSql(tableName), SqlType.search,
 				dialect, null);
 		String loadSql = sqlToyConfig.getSql(dialect);
 		loadSql = loadSql.concat(getLockSql(loadSql, dbType, lockMode));
-		return (Serializable) DialectUtils.load(sqlToyContext, sqlToyConfig, loadSql, entityMeta, entity, cascadeTypes,
-				conn, dbType);
+		return (Serializable) DialectUtils.load(sqlToyContext, sqlToyConfig, loadSql, entityMeta, entity, onlySubTables,
+				cascadeTypes, conn, dbType);
 	}
 
 	/*
@@ -162,11 +175,11 @@ public class MogDBDialect implements Dialect {
 	 * org.sagacity.sqltoy.lock.LockMode, java.sql.Connection)
 	 */
 	@Override
-	public List<?> loadAll(SqlToyContext sqlToyContext, List<?> entities, List<Class> cascadeTypes, LockMode lockMode,
-			Connection conn, final Integer dbType, final String dialect, final String tableName, final int fetchSize,
-			final int maxRows) throws Exception {
-		return DialectUtils.loadAll(sqlToyContext, entities, cascadeTypes, lockMode, conn, dbType, tableName,
-				(sql, dbTypeValue, lockedMode) -> {
+	public List<?> loadAll(SqlToyContext sqlToyContext, List<?> entities, boolean onlySubTables,
+			List<Class> cascadeTypes, LockMode lockMode, Connection conn, final Integer dbType, final String dialect,
+			final String tableName, final int fetchSize, final int maxRows) throws Exception {
+		return DialectUtils.loadAll(sqlToyContext, entities, onlySubTables, cascadeTypes, lockMode, conn, dbType,
+				tableName, (sql, dbTypeValue, lockedMode) -> {
 					return getLockSql(sql, dbTypeValue, lockedMode);
 				}, fetchSize, maxRows);
 	}
@@ -181,17 +194,8 @@ public class MogDBDialect implements Dialect {
 	public Object save(SqlToyContext sqlToyContext, Serializable entity, Connection conn, final Integer dbType,
 			final String dialect, final String tableName) throws Exception {
 		EntityMeta entityMeta = sqlToyContext.getEntityMeta(entity.getClass());
-		PKStrategy pkStrategy = entityMeta.getIdStrategy();
+		PKStrategy pkStrategy = GaussDialectUtils.getSavePkStrategy(entityMeta, entity, dbType, conn);
 		String sequence = entityMeta.getSequence() + ".nextval";
-		// gaussdb 主键策略是sequence模式需要先获取主键值
-		if (pkStrategy != null && pkStrategy.equals(PKStrategy.SEQUENCE)) {
-			// 不允许手工赋值，重新取值覆盖
-			Object id = SqlUtil.getSequenceValue(conn, entityMeta.getSequence(), dbType);
-			if (id != null) {
-				BeanUtil.setProperty(entity, entityMeta.getIdArray()[0], id);
-			}
-			pkStrategy = PKStrategy.ASSIGN;
-		}
 		boolean isAssignPK = MogDBDialectUtils.isAssignPKValue(pkStrategy);
 		String insertSql = DialectExtUtils.generateInsertSql(sqlToyContext.getUnifyFieldsHandler(), dbType, entityMeta,
 				pkStrategy, NVL_FUNCTION, sequence, isAssignPK, tableName);
@@ -254,9 +258,9 @@ public class MogDBDialect implements Dialect {
 						String sequence = entityMeta.getSequence() + ".nextval";
 						boolean isAssignPK = MogDBDialectUtils.isAssignPKValue(pkStrategy);
 						// update 级联操作过程中会自动判断数据库类型
-						return DialectUtils.getSaveOrUpdateSql(sqlToyContext.getUnifyFieldsHandler(), dbType,
-								entityMeta, pkStrategy, forceUpdateFields, null, NVL_FUNCTION, sequence, isAssignPK,
-								null);
+						return DialectUtils.getSaveOrUpdateSql(sqlToyContext, sqlToyContext.getUnifyFieldsHandler(),
+								dbType, entityMeta, pkStrategy, forceUpdateFields, null, NVL_FUNCTION, sequence,
+								isAssignPK, null);
 					}
 				}, forceCascadeClasses, subTableForceUpdateProps, conn, dbType, tableName);
 	}
@@ -322,9 +326,9 @@ public class MogDBDialect implements Dialect {
 						PKStrategy pkStrategy = entityMeta.getIdStrategy();
 						String sequence = entityMeta.getSequence() + ".nextval";
 						boolean isAssignPK = MogDBDialectUtils.isAssignPKValue(pkStrategy);
-						return DialectUtils.getSaveOrUpdateSql(sqlToyContext.getUnifyFieldsHandler(), dbType,
-								entityMeta, pkStrategy, forceUpdateFields, null, NVL_FUNCTION, sequence, isAssignPK,
-								tableName);
+						return DialectUtils.getSaveOrUpdateSql(sqlToyContext, sqlToyContext.getUnifyFieldsHandler(),
+								dbType, entityMeta, pkStrategy, forceUpdateFields, null, NVL_FUNCTION, sequence,
+								isAssignPK, tableName);
 					}
 				}, reflectPropsHandler, conn, dbType, autoCommit);
 	}

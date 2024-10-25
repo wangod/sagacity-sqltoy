@@ -5,6 +5,8 @@ package org.sagacity.sqltoy.utils;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,7 +18,7 @@ import org.sagacity.sqltoy.SqlToyConstants;
 import org.sagacity.sqltoy.config.model.SqlToyConfig;
 import org.sagacity.sqltoy.utils.DataSourceUtils.DBType;
 
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
 
 /**
  * @author zhongxuchen
@@ -182,19 +184,31 @@ public class StringUtilsTest {
 	}
 
 	@Test
-	public void testReplace2() {
-		String argValue = "111,2222";
-		String argTrim = argValue.replaceAll("\\s+", "");
-		if ((argTrim.indexOf(",") > 0 && !argTrim.endsWith(",") && SqlUtil.validateInArg(argTrim))
-				|| (argTrim.equals("''"))) {
-			System.err.println("[" + argValue + "]");
-		}
+	public void testReplace2() throws UnsupportedEncodingException {
+		String argValue = "/D:/personal/sqltoy/sqltoy%20&+quick中start/target/classes/com/sqltoy/quickstart/sql/sqltoy-quickstart.sql.xml";
+		System.err.println(URLDecoder.decode(argValue, "GBK"));
+
+	}
+
+	@Test
+	public void testIfMatch() throws UnsupportedEncodingException {
+		Pattern IF_PATTERN = Pattern.compile("(?i)\\@if\\s*\\(");
+		Pattern ELSEIF_PATTERN = Pattern.compile("(?i)\\@elseif\\s*\\(");
+		Pattern ELSE_PATTERN = Pattern.compile("(?i)\\@else(\\s+|\\s*\\(\\s*\\))");
+		Pattern IF_ALL_PATTERN = Pattern.compile("(?i)\\@((if|elseif)\\s*\\(|else(\\s+|\\s*\\(\\s*\\)))");
+		System.err.println(StringUtil.matches("@else(and ", IF_ALL_PATTERN));
+		System.err.println(StringUtil.matches("@else and ", IF_ALL_PATTERN));
+		System.err.println(StringUtil.matches("@elseif and ", IF_ALL_PATTERN));
+		System.err.println(StringUtil.matches("@elseif(:a==1) and ", IF_ALL_PATTERN));
+		System.err.println(StringUtil.matches("@if(:a==1) and ", IF_ALL_PATTERN));
+		System.err.println(StringUtil.matches("@else(:a==1) and ", IF_ALL_PATTERN));
+		System.err.println(StringUtil.matches("@else() and ", IF_ALL_PATTERN));
 
 	}
 
 	@Test
 	public void testMatchInclude() {
-		Map<String, Object> sqlCache =new HashMap<>();
+		Map<String, Object> sqlCache = new HashMap<>();
 		System.err.println((SqlToyConfig) sqlCache.get("test_id"));
 		String sql = "select * from table @include(id=\"adb\")";
 		System.err.println(StringUtil.matches(sql, SqlToyConstants.INCLUDE_PATTERN));
@@ -202,9 +216,31 @@ public class StringUtilsTest {
 		System.err.println(StringUtil.matches(sql, SqlToyConstants.INCLUDE_PARAM_PATTERN));
 		sql = "select * from table @include( :itemList )";
 		System.err.println(StringUtil.matches(sql, SqlToyConstants.INCLUDE_PARAM_PATTERN));
-		String tmp="select from ";
+		String tmp = "select from ";
 		if (StringUtil.matches(" " + tmp, "(?i)\\Wselect\\W") && StringUtil.matches(tmp, "(?i)\\Wfrom\\W")) {
-			System.err.println("ddd"+true);
+			System.err.println("ddd" + true);
 		}
+	}
+
+	@Test
+	public void testClearSymMark() {
+		String sql = "select * from table #[and field=:field]  #[]#[]and t1=t1";
+		System.err.println(StringUtil.clearSymMarkContent(sql, "#[", "]"));
+	}
+
+	@Test
+	public void testMatchCount() {
+		String sql = "select * from table #[[[]]]";
+		System.err.println(StringUtil.matchCnt(sql, Pattern.compile("\\["), 0));
+	}
+
+	@Test
+	public void testMatchIndex() {
+		String sql = "select * from table #[[";
+		int[] indexes = StringUtil.matchIndex(sql, Pattern.compile("\\#\\["), 0);
+		System.err.println("firstIndex=" + indexes[0]);
+		System.err.println("firstEnd=" + indexes[1]);
+		System.err.println("nextStart=" + StringUtil.matchIndex(sql, Pattern.compile("\\["), indexes[1])[0]);
+		System.err.println("nextEnd=" + StringUtil.matchIndex(sql, Pattern.compile("\\["), indexes[1])[1]);
 	}
 }
